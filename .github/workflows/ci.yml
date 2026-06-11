@@ -25,7 +25,9 @@ jobs:
         run: pip install uv
 
       - name: Install dependencies
-        run: uv pip install --system -r pyproject.toml || uv pip install --system fastapi "uvicorn[standard]" ruff mypy httpx pytest pytest-asyncio
+        run: |
+          uv pip install --system -r pyproject.toml || true
+          uv pip install --system ruff mypy fastapi "uvicorn[standard]" httpx pytest pytest-asyncio
 
       - name: Lint
         run: ruff check src/
