@@ -45,4 +45,4 @@ files = ["src", "tests"]
 # `src` não é instalado (package = false): o rootdir entra no sys.path.
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-v --strict-markers --cov=src --cov-report=term-missing --cov-fail-under=90"
+addopts = "-v --strict-markers --tb=short --cov=src --cov-report=term-missing --cov-fail-under=90"
