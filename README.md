@@ -59,13 +59,62 @@ docker run -p 8000:8000 srv-fastapi-template
 
 ## CI
 
-`.github/workflows/ci.yml`, em dois jobs:
+`.github/workflows/ci.yml`, em três jobs:
 
 1. **quality** — `ruff check`, `ruff format --check`, `mypy`, `pytest` (Python 3.13).
-2. **docker** — constrói a imagem em toda branch/PR (gate) e **publica no GHCR só na branch default**.
+2. **docker-build** — `docker build` **sem push**, em todo PR e branch de feature. É o gate:
+   Dockerfile quebrado reprova antes do merge, não depois. Não faz login no GHCR e não
+   recebe `packages: write`.
+3. **docker-publish** — build **+ push** no GHCR, só em push na branch default. É o único
+   job com `packages: write`.
 
-`concurrency` com `cancel-in-progress` derruba execuções antigas da mesma ref;
-`permissions` é `contents: read` por padrão, elevado a `packages: write` só no job que publica.
+Os dois jobs de imagem são mutuamente exclusivos: em PR o `docker-publish` aparece como
+`skipped`, e na branch default é o `docker-build` que fica `skipped`.
+
+`concurrency` com `cancel-in-progress` derruba execuções antigas da mesma ref.
+
+### Runner: repo privado gerado a partir deste template precisa configurar
+
+Este template é **público**, e em repositório público o GitHub Actions em runner hospedado
+é gratuito. **O repo que você gera a partir dele é privado**, onde os minutos são cota paga
+— e a cota da organização está esgotada. Por isso o `runs-on` é parametrizado por variável
+de repositório, com default hospedado:
+
+```yaml
+runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
+```
+
+Antes do primeiro push no repo novo, defina as duas variáveis (Settings → Secrets and
+variables → Actions → Variables), ou por CLI:
+
+```bash
+gh variable set CI_RUNNER        --body '["self-hosted","desenrolai"]'
+gh variable set CI_RUNNER_DOCKER --body '["self-hosted","docker-builder"]'
+```
+
+- O valor é **JSON**, não texto solto. `'["self-hosted","desenrolai"]'` vira dois labels;
+  a string `self-hosted,desenrolai` viraria **um** label só, que nenhum runner atende, e o
+  job ficaria em `queued` para sempre.
+- `CI_RUNNER_DOCKER` é separado porque o build de imagem exige o runner com Docker
+  (`docker-builder`); os demais jobs rodam no pool geral.
+- Sem as variáveis, tudo continua em `ubuntu-latest` — este template continua verde assim.
+
+**Sintoma de não configurar:** o job termina em **~2 segundos**, com **zero steps
+executados** e conclusão **`failure`** — sem nenhum log de erro que oriente.
+
+Cuidado: *zero steps sozinho não é a assinatura.* Um job legitimamente **`skipped`**
+também reporta zero steps — e este workflow tem um por design: em PR, o `docker-publish`
+aparece `skipped`, e isso é o comportamento correto. **O que separa os dois é a
+conclusão:**
+
+| Conclusão | Steps | Significado |
+|---|---|---|
+| `failure` em ~2s | 0 | **Billing** — cota de Actions esgotada/bloqueada, ou runner inexistente |
+| `skipped` | 0 | O `if:` do job não bateu. Está tudo certo. |
+| `queued` que nunca sai | — | `CI_RUNNER` com label que nenhum runner atende (ex.: valor não-JSON) |
+
+Não perca tempo procurando erro de sintaxe: com `failure` em ~2s, confira a variável e o
+billing da organização.
 
 ## Dependências
 

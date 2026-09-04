@@ -11,7 +11,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Default mínimo; o job que publica imagem eleva o próprio escopo.
+# Default mínimo; só o job que publica imagem eleva o próprio escopo.
 permissions:
   contents: read
 
@@ -23,7 +23,12 @@ env:
 jobs:
   quality:
     name: Lint / Format / Typecheck / Test
-    runs-on: ubuntu-latest
+    # Runner por variável de repositório. Sem `vars.CI_RUNNER` o default é o hosted
+    # `ubuntu-latest` — que é o que este template público usa. O valor precisa ser
+    # JSON: `'["self-hosted","desenrolai"]'` são DOIS labels; a string
+    # `self-hosted,desenrolai` seria UM label só, que nenhum runner atende.
+    # Repo privado gerado a partir daqui: ver README → CI.
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,9 +58,34 @@ jobs:
       - name: Test
         run: uv run pytest
 
-  docker:
-    name: Docker build${{ github.ref_name == github.event.repository.default_branch && ' + push' || '' }}
-    runs-on: ubuntu-latest
+  # Gate de PR: um Dockerfile quebrado precisa reprovar ANTES do merge. Sem login no
+  # GHCR e sem `packages: write` — herda o `contents: read` do workflow.
+  docker-build:
+    name: Docker build (sem push)
+    if: ${{ !(github.event_name == 'push' && github.ref_name == github.event.repository.default_branch) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_DOCKER || '"ubuntu-latest"') }}
+    needs: quality
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          # Tag local: nada é publicado neste job.
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Só a branch default publica. Mutuamente exclusivo com o job acima.
+  docker-publish:
+    name: Docker build + push (GHCR)
+    if: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_DOCKER || '"ubuntu-latest"') }}
     needs: quality
     permissions:
       contents: read
@@ -67,19 +97,17 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Em PR/branch a imagem é só construída (gate); só a default branch publica.
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+          push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.repository.default_branch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
