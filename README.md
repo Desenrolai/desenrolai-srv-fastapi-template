@@ -99,9 +99,21 @@ gh variable set CI_RUNNER_DOCKER --body '["self-hosted","docker-builder"]'
   (`docker-builder`); os demais jobs rodam no pool geral.
 - Sem as variáveis, tudo continua em `ubuntu-latest` — este template continua verde assim.
 
-**Sintoma de não configurar:** o job morre em ~2 segundos com **`steps: 0`**, sem log de
-erro que oriente. Isso é assinatura de **billing** (cota de Actions esgotada/bloqueada),
-não de YAML quebrado. Não perca tempo procurando erro de sintaxe: confira a variável e o
+**Sintoma de não configurar:** o job termina em **~2 segundos**, com **zero steps
+executados** e conclusão **`failure`** — sem nenhum log de erro que oriente.
+
+Cuidado: *zero steps sozinho não é a assinatura.* Um job legitimamente **`skipped`**
+também reporta zero steps — e este workflow tem um por design: em PR, o `docker-publish`
+aparece `skipped`, e isso é o comportamento correto. **O que separa os dois é a
+conclusão:**
+
+| Conclusão | Steps | Significado |
+|---|---|---|
+| `failure` em ~2s | 0 | **Billing** — cota de Actions esgotada/bloqueada, ou runner inexistente |
+| `skipped` | 0 | O `if:` do job não bateu. Está tudo certo. |
+| `queued` que nunca sai | — | `CI_RUNNER` com label que nenhum runner atende (ex.: valor não-JSON) |
+
+Não perca tempo procurando erro de sintaxe: com `failure` em ~2s, confira a variável e o
 billing da organização.
 
 ## Dependências
