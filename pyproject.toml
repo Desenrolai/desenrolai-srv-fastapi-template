@@ -1,28 +1,48 @@
 [project]
 name = "srv-fastapi-template"
 version = "0.1.0"
-requires-python = ">=3.12"
+description = "Template: backend Python 3.13 + FastAPI"
+requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
+    "fastapi>=0.141.1",
+    "pydantic>=2.13.5",
+    "uvicorn[standard]>=0.52.4",
 ]
 
-[tool.uv]
-dev-dependencies = [
-    "ruff>=0.9.0",
-    "mypy>=1.13.0",
-    "httpx>=0.28.0",
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.25.0",
+[dependency-groups]
+dev = [
+    # httpx2 2.x (ago/2026) é o sucessor que o starlette 1.6 já anuncia; fica fora
+    # até o ecossistema assentar — por ora o TestClient só emite DeprecationWarning.
+    "httpx>=0.28.1,<0.29",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.6",
 ]
+
+# Hello-world app, não pacote distribuível: uv não tenta buildar wheel.
+[tool.uv]
+package = false
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+# S = flake8-bandit (segurança), I = isort (ordem de import), B = bugbear, SIM = simplify.
+select = ["E", "F", "I", "UP", "B", "SIM", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest usa `assert`; S101 não se aplica a teste.
+"tests/**" = ["S101"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+# `src` não é instalado (package = false): o rootdir entra no sys.path.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v --strict-markers --cov=src --cov-report=term-missing --cov-fail-under=90"

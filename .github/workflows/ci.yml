@@ -6,59 +6,79 @@ on:
   pull_request:
     branches: ["**"]
 
+# Push novo na mesma ref cancela a execução anterior.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default mínimo; o job que publica imagem eleva o próprio escopo.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: desenrolai/${{ github.event.repository.name }}
+  PYTHON_VERSION: "3.13"
 
 jobs:
-  lint-test:
+  quality:
+    name: Lint / Format / Typecheck / Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          uv pip install --system -r pyproject.toml || true
-          uv pip install --system ruff mypy fastapi "uvicorn[standard]" httpx pytest pytest-asyncio
+        run: uv sync --locked --all-groups
 
       - name: Lint
-        run: ruff check src/
+        run: uv run ruff check src tests
+
+      - name: Format check
+        run: uv run ruff format --check src tests
 
       - name: Typecheck
-        run: mypy src/ --ignore-missing-imports
+        run: uv run mypy
 
-  build-push:
+      - name: Test
+        run: uv run pytest
+
+  docker:
+    name: Docker build${{ github.ref_name == github.event.repository.default_branch && ' + push' || '' }}
     runs-on: ubuntu-latest
-    needs: lint-test
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: quality
     permissions:
       contents: read
       packages: write
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      # Em PR/branch a imagem é só construída (gate); só a default branch publica.
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
-          push: true
+          push: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.repository.default_branch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
